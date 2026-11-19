@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#0f172a">
+<meta name="theme-color" content="#141218">
+<meta name="color-scheme" content="dark">
 <title>ELOCHILL</title>
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -22,23 +23,25 @@
       <p class="sub">Подтверждение результатов StandChillow</p>
     </div>
     <div class="card">
-      <label class="label" for="nickInput">Ник игрока</label>
-      <input id="nickInput" class="input" type="text" maxlength="24" autocomplete="off" spellcheck="false" placeholder="Введите ник">
-      <div id="loginError" class="err"></div>
-      <button id="btnLogin" class="btn primary">Войти</button>
-      <p class="hint">Ник используется для поиска вашего профиля. Повторный вход с тем же ником вернёт ваш Эло.</p>
+      <div class="field">
+        <label for="nickInput">Ник игрока</label>
+        <input id="nickInput" type="text" maxlength="24" autocomplete="off" spellcheck="false" placeholder="Введите ник">
+      </div>
+      <div id="loginError" class="err" role="alert"></div>
+      <button id="btnLogin" class="btn filled">Войти</button>
+      <p class="hint">Ник используется для поиска профиля. Повторный вход с тем же ником вернёт ваш Эло.</p>
     </div>
   </section>
 
   <!-- ГЛАВНОЕ МЕНЮ -->
   <section id="screen-main" class="screen">
-    <div class="profile card">
+    <div class="card profile">
       <div class="avatar" id="mAva">E</div>
       <div class="profile-main">
         <div class="nick" id="mNick">—</div>
         <div class="badges">
           <span class="badge">Уровень <b id="mLevel">1</b></span>
-          <span class="badge elo">Эло <b id="mElo">0</b></span>
+          <span class="badge">Эло <b id="mElo">0</b></span>
         </div>
       </div>
     </div>
@@ -59,11 +62,11 @@
       </div>
     </div>
 
-    <button id="btnSubmit" class="btn primary big">📸 Отправить результат</button>
-    <button id="btnLeaderboard" class="btn ghost">🏆 Таблица лидеров</button>
-    <button id="btnLogout" class="btn ghost small">Выйти</button>
+    <button id="btnSubmit" class="btn filled big">📸 Отправить результат</button>
+    <button id="btnLeaderboard" class="btn tonal">🏆 Таблица лидеров</button>
+    <button id="btnLogout" class="btn text-btn small">Выйти</button>
 
-    <div id="offlineNote" class="notice">Нет соединения — доступен только просмотр сохранённых данных.</div>
+    <div id="offlineNote" class="notice">Нет соединения — доступны только сохранённые данные.</div>
   </section>
 
   <!-- ОТПРАВКА -->
@@ -71,29 +74,33 @@
     <button class="back" data-back="screen-main">‹ Назад</button>
     <h2 class="title">Отправить результат</h2>
     <div class="card">
-      <label class="label">Скриншот матча</label>
-      <label class="filepick" for="fileInput">
-        <span class="filepick-ico">＋</span>
-        <span id="fileName">Выбрать скриншот</span>
-      </label>
+      <div class="field">
+        <label>Скриншот матча</label>
+        <label class="filepick" for="fileInput">
+          <span class="filepick-ico">＋</span>
+          <span id="fileName">Выбрать скриншот</span>
+        </label>
+      </div>
       <input id="fileInput" class="hidden-input" type="file" accept="image/*">
       <p class="hint">Файл нужен для симуляции проверки. Изображение никуда не загружается.</p>
 
-      <label class="label">Исход матча</label>
-      <div class="outcomes">
-        <label class="outcome">
-          <input type="radio" name="outcome" value="win" checked>
-          <span class="outcome-box"><b>Победа</b><small>+50 Эло</small></span>
-        </label>
-        <label class="outcome">
-          <input type="radio" name="outcome" value="lose">
-          <span class="outcome-box"><b>Поражение</b><small>−10 Эло</small></span>
-        </label>
+      <div class="field">
+        <label>Исход матча</label>
+        <div class="segmented">
+          <label class="seg">
+            <input type="radio" name="outcome" value="win" checked>
+            <span><b>Победа</b><small>+50 Эло</small></span>
+          </label>
+          <label class="seg">
+            <input type="radio" name="outcome" value="lose">
+            <span><b>Поражение</b><small>−10 Эло</small></span>
+          </label>
+        </div>
       </div>
 
-      <div id="submitError" class="err"></div>
-      <button id="btnSend" class="btn primary">Отправить на проверку</button>
-      <p class="hint">Лимит: не чаще 1 раза в 3 минуты, максимум 10 проверок в день. Проверка одобряется с вероятностью 80%.</p>
+      <div id="submitError" class="err" role="alert"></div>
+      <button id="btnSend" class="btn filled">Отправить на проверку</button>
+      <p class="hint">Не чаще 1 раза в 3 минуты, максимум 10 проверок в день. Одобрение — с вероятностью 80%.</p>
     </div>
   </section>
 
@@ -110,12 +117,12 @@
   <!-- РЕЗУЛЬТАТ -->
   <section id="screen-result" class="screen">
     <div class="card result-card">
-      <div id="resultIcon" class="result-icon">✅</div>
+      <div class="result-icon-wrap"><div id="resultIcon" class="result-icon">✅</div></div>
       <h2 id="resultTitle" class="title center">Подтверждено</h2>
       <p id="resultText" class="result-text"></p>
       <div id="resultDelta" class="delta"></div>
       <div id="resultStats" class="result-stats"></div>
-      <button id="btnResultMenu" class="btn primary">В главное меню</button>
+      <button id="btnResultMenu" class="btn filled">В главное меню</button>
     </div>
   </section>
 

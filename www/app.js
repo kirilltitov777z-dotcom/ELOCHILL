@@ -15,7 +15,7 @@
     }
   } catch (e) { sb = null; }
 
-  var online = navigator.onLine !== false;
+  var online = true; // проверяем реальным запросом, navigator.onLine во WebView unreliable
   var user = load(LS_USER, null);
   var outcome = 'win';
   var fileChosen = false;
@@ -46,54 +46,94 @@
     document.body.classList.toggle('is-offline', !online);
     if (user) updateMainStats();
   }
-  window.addEventListener('online', function () { setNet(true); });
+  window.addEventListener('online', function () { ping(); });
   window.addEventListener('offline', function () { setNet(false); });
+
+  function isNetworkError(e) {
+    var m = String((e && (e.message || e)) || e);
+    return /failed to fetch|networkerror|network request failed|load failed|offline/i.test(m) || (e instanceof TypeError);
+  }
+
+  // Проверка соединения через health-endpoint Supabase (не зависит от SQL)
+  async function ping() {
+    try {
+      var r = await fetch(URL + '/auth/v1/health', { cache: 'no-store', headers: { 'apikey': KEY } });
+      setNet(r.ok || r.status === 401 || r.status === 404);
+      return true;
+    } catch (e) { setNet(false); return false; }
+  }
 
   // ---------- API ----------
   async function rpc(name, args) {
     args = args || {};
-    if (online && sb) {
+    if (sb) {
       try {
         var res = await sb.rpc(name, args);
         if (res.error) throw res.error;
+        setNet(true);
         return res.data;
-      } catch (e) { /* fall through to REST */ }
+      } catch (e) {
+        if (isNetworkError(e)) { setNet(false); throw new Error('Нет соединения с сервером'); }
+        // ошибка БД/функции — пробуем REST и показываем настоящий текст
+      }
     }
-    if (!online) throw new Error('Нет соединения с сервером');
-    var r = await fetch(URL + '/rest/v1/rpc/' + name, {
-      method: 'POST',
-      headers: {
-        'apikey': KEY,
-        'Authorization': 'Bearer ' + KEY,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(args)
-    });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
+    var r;
+    try {
+      r = await fetch(URL + '/rest/v1/rpc/' + name, {
+        method: 'POST',
+        headers: {
+          'apikey': KEY,
+          'Authorization': 'Bearer ' + KEY,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(args)
+      });
+      setNet(true);
+    } catch (e) {
+      setNet(false);
+      throw new Error('Нет соединения с сервером');
+    }
+    if (!r.ok) {
+      var body = {};
+      try { body = await r.json(); } catch (e) {}
+      var err = new Error(body.message || body.details || ('HTTP ' + r.status));
+      err.code = (body && body.code) || String(r.status);
+      throw err;
+    }
     return await r.json();
   }
 
-  async function loadLeaderboard() {
-    if (online) {
-      try {
-        var rows;
-        if (sb) {
-          var q = await sb.from('leaderboard').select('username,elo,level').order('elo', { ascending: false }).limit(100);
-          if (q.error) throw q.error;
-          rows = q.data;
-        } else {
-          var r = await fetch(URL + '/rest/v1/leaderboard?select=username,elo,level&order=elo.desc&limit=100', {
-            headers: { 'apikey': KEY, 'Authorization': 'Bearer ' + KEY }
-          });
-          if (!r.ok) throw new Error('HTTP ' + r.status);
-          rows = await r.json();
-        }
-        save(LS_LB, rows);
-        setNet(true);
-        return { rows: rows, cached: false };
-      } catch (e) { setNet(false); }
+  function prettyError(e) {
+    var code = String((e && e.code) || '');
+    var m = String((e && e.message) || e);
+    if (/PGRST202|PGRST205|404|42P01|42883/.test(code + ' ' + m)) {
+      return 'База не настроена: выполните supabase/schema.sql в Supabase SQL Editor';
     }
-    return { rows: load(LS_LB, []), cached: true };
+    if (/401|403|PGRST301/.test(code + ' ' + m)) return 'Ошибка доступа к Supabase';
+    return m;
+  }
+
+  async function loadLeaderboard() {
+    try {
+      var rows;
+      if (sb) {
+        var q = await sb.from('leaderboard').select('username,elo,level').order('elo', { ascending: false }).limit(100);
+        if (q.error) throw q.error;
+        rows = q.data;
+      } else {
+        var r = await fetch(URL + '/rest/v1/leaderboard?select=username,elo,level&order=elo.desc&limit=100', {
+          headers: { 'apikey': KEY, 'Authorization': 'Bearer ' + KEY }
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        rows = await r.json();
+      }
+      save(LS_LB, rows);
+      setNet(true);
+      return { rows: rows, cached: false };
+    } catch (e) {
+      if (isNetworkError(e)) setNet(false);
+      return { rows: load(LS_LB, []), cached: true };
+    }
   }
 
   // ---------- Логин ----------
@@ -103,7 +143,6 @@
     var err = $('loginError');
     err.textContent = '';
     if (nick.length < 2 || nick.length > 24) { err.textContent = 'Ник: от 2 до 24 символов'; return; }
-    if (!navigator.onLine) { err.textContent = 'Нет соединения. Вход требует интернета.'; setNet(false); return; }
 
     busy = true;
     var btn = $('btnLogin');
@@ -117,8 +156,7 @@
       renderMain();
       show('screen-main');
     } catch (e) {
-      err.textContent = 'Ошибка соединения: ' + (e.message || e);
-      setNet(false);
+      err.textContent = prettyError(e);
     } finally {
       busy = false; btn.disabled = false; btn.textContent = 'Войти';
     }
@@ -177,7 +215,6 @@
     var err = $('submitError');
     err.textContent = '';
     if (!fileChosen) { err.textContent = 'Выберите скриншот'; return; }
-    if (!navigator.onLine) { err.textContent = 'Без интернета результат отправить нельзя'; setNet(false); return; }
     if ((user.cooldown_seconds || 0) > 0) { err.textContent = 'Подождите ' + fmtTime(user.cooldown_seconds); return; }
     if ((user.submissions_today || 0) >= 10) { err.textContent = 'Дневной лимит исчерпан'; return; }
 
@@ -222,8 +259,7 @@
       r = await rpc('submit_result', { p_username: user.username, p_outcome: outcome });
       setNet(true);
     } catch (e) {
-      setNet(false);
-      showResult({ error: 'Нет соединения. Результат не отправлен.' });
+      showResult({ error: prettyError(e) });
       prog.style.width = '100%';
       return;
     }
@@ -350,7 +386,7 @@
   }, 1000);
 
   // ---------- Старт ----------
-  setNet(navigator.onLine !== false);
+  ping();
   if (user) {
     $('mAva').textContent = String(user.username || 'E').charAt(0).toUpperCase();
     renderMain();
