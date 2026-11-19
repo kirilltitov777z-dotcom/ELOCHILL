@@ -30,6 +30,16 @@
     var all = document.querySelectorAll('.screen');
     for (var i = 0; i < all.length; i++) all[i].classList.remove('active');
     $(id).classList.add('active');
+    var navIds = ['screen-main', 'screen-submit', 'screen-lb'];
+    var withNav = navIds.indexOf(id) >= 0;
+    var nav = $('navbar');
+    if (nav) {
+      nav.hidden = !withNav;
+      var items = nav.querySelectorAll('.nav-item');
+      for (var k = 0; k < items.length; k++) {
+        items[k].classList.toggle('active', items[k].getAttribute('data-nav') === id);
+      }
+    }
     window.scrollTo(0, 0);
   }
   function fmtTime(s) {
@@ -150,7 +160,7 @@
     try {
       var r = await rpc('get_or_create_user', { p_username: nick });
       if (!r || r.error) { err.textContent = (r && r.error) ? String(r.error) : 'Ошибка ответа сервера'; return; }
-      user = { username: r.username, elo: r.elo, level: r.level, submissions_today: 0, cooldown_seconds: 0 };
+      user = { username: r.username, elo: r.elo, level: r.level, submissions_today: 0, total_submissions: 0 };
       save(LS_USER, user);
       $('mAva').textContent = String(r.username).charAt(0).toUpperCase();
       renderMain();
@@ -180,11 +190,9 @@
       $('mProgress').style.width = '100%';
     }
 
-    var subs = user.submissions_today || 0;
-    var cd = user.cooldown_seconds || 0;
-    $('mSubs').textContent = subs + ' / 10';
-    $('mCooldown').textContent = cd > 0 ? fmtTime(cd) : 'доступно';
-    $('btnSubmit').disabled = busy || !online || cd > 0 || subs >= 10;
+    $('mSubs').textContent = String(user.submissions_today || 0);
+    $('mTotal').textContent = String(user.total_submissions || 0);
+    $('btnSubmit').disabled = busy || !online;
   }
 
   async function renderMain() {
@@ -196,7 +204,7 @@
       if (p && !p.error) {
         user.elo = p.elo; user.level = p.level;
         user.submissions_today = p.submissions_today || 0;
-        user.cooldown_seconds = p.cooldown_seconds || 0;
+        user.total_submissions = p.total_submissions || 0;
         save(LS_USER, user);
         updateMainStats();
       }
@@ -215,8 +223,6 @@
     var err = $('submitError');
     err.textContent = '';
     if (!fileChosen) { err.textContent = 'Выберите скриншот'; return; }
-    if ((user.cooldown_seconds || 0) > 0) { err.textContent = 'Подождите ' + fmtTime(user.cooldown_seconds); return; }
-    if ((user.submissions_today || 0) >= 10) { err.textContent = 'Дневной лимит исчерпан'; return; }
 
     busy = true;
     $('btnSend').disabled = true;
@@ -270,23 +276,11 @@
 
   function applyResult(r) {
     if (!r) { showResult({ error: 'Пустой ответ сервера' }); return; }
-    if (r.error === 'cooldown') {
-      user.cooldown_seconds = r.cooldown_seconds || 0;
-      save(LS_USER, user);
-      showResult({ title: 'Слишком рано', icon: '⏳', text: 'Следующая проверка будет доступна через ' + fmtTime(user.cooldown_seconds), delta: 0 });
-      return;
-    }
-    if (r.error === 'daily_limit') {
-      user.submissions_today = 10;
-      save(LS_USER, user);
-      showResult({ title: 'Лимит исчерпан', icon: '⏳', text: 'Максимум 10 проверок в день. Лимит сбросится завтра.', delta: 0 });
-      return;
-    }
     if (r.error) { showResult({ error: String(r.error) }); return; }
 
     user.elo = r.elo; user.level = r.level;
     user.submissions_today = r.submissions_today != null ? r.submissions_today : ((user.submissions_today || 0) + 1);
-    user.cooldown_seconds = 180;
+    user.total_submissions = r.total_submissions != null ? r.total_submissions : ((user.total_submissions || 0) + 1);
     save(LS_USER, user);
 
     if (r.accepted) {
@@ -295,7 +289,7 @@
         icon: '✅',
         text: 'Результат прошёл автоматическую проверку',
         delta: r.delta || 0,
-        stats: 'Эло: ' + r.elo + ' · Уровень: ' + r.level + '<br>Проверок сегодня: ' + user.submissions_today + ' / 10'
+        stats: 'Эло: ' + r.elo + ' · Уровень: ' + r.level + '<br>Проверок сегодня: ' + user.submissions_today + ' · Всего: ' + user.total_submissions
       });
     } else {
       showResult({
@@ -303,7 +297,7 @@
         icon: '❌',
         text: 'Причина: ' + (r.reason || 'Не удалось распознать данные на скриншоте'),
         delta: 0,
-        stats: 'Эло без изменений: ' + r.elo + ' · Уровень: ' + r.level + '<br>Проверок сегодня: ' + user.submissions_today + ' / 10'
+        stats: 'Эло без изменений: ' + r.elo + ' · Уровень: ' + r.level + '<br>Проверок сегодня: ' + user.submissions_today + ' · Всего: ' + user.total_submissions
       });
     }
   }
@@ -377,13 +371,16 @@
 
   $('btnSend').addEventListener('click', sendResult);
 
-  // таймер кдаунта в меню
-  setInterval(function () {
-    if (user && (user.cooldown_seconds || 0) > 0) {
-      user.cooldown_seconds = Math.max(0, user.cooldown_seconds - 1);
-      updateMainStats();
-    }
-  }, 1000);
+  // нижняя навигация
+  var navItems = document.querySelectorAll('.nav-item');
+  for (var n = 0; n < navItems.length; n++) {
+    navItems[n].addEventListener('click', function () {
+      var target = this.getAttribute('data-nav');
+      if (target === 'screen-submit') openSubmit();
+      else if (target === 'screen-lb') openLeaderboard();
+      else show(target);
+    });
+  }
 
   // ---------- Старт ----------
   ping();

@@ -57,8 +57,8 @@
         <div class="mini-value" id="mSubs">0 / 10</div>
       </div>
       <div class="card mini">
-        <div class="mini-label">Следующая проверка</div>
-        <div class="mini-value" id="mCooldown">доступно</div>
+        <div class="mini-label">Всего проверок</div>
+        <div class="mini-value" id="mTotal">0</div>
       </div>
     </div>
 
@@ -100,7 +100,7 @@
 
       <div id="submitError" class="err" role="alert"></div>
       <button id="btnSend" class="btn filled">Отправить на проверку</button>
-      <p class="hint">Не чаще 1 раза в 3 минуты, максимум 10 проверок в день. Одобрение — с вероятностью 80%.</p>
+      <p class="hint">Безлимитно, без ожидания. Решение проверки принимается сервером: одобрение с вероятностью 80%.</p>
     </div>
   </section>
 
@@ -135,6 +135,21 @@
     </div>
     <div id="lbList" class="lb-list"></div>
   </section>
+
+  <nav class="navbar" id="navbar">
+    <button class="nav-item active" data-nav="screen-main">
+      <span class="nav-ico"><svg viewBox="0 0 24 24"><path d="M12 3 2 12h3v9h6v-6h2v6h6v-9h3L12 3z"/></svg></span>
+      <span>Главная</span>
+    </button>
+    <button class="nav-item" data-nav="screen-submit">
+      <span class="nav-ico"><svg viewBox="0 0 24 24"><path d="M9 4 7.5 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.5L15 4H9zm3 5a5 5 0 1 1 0 10 5 5 0 0 1 0-10z"/></svg></span>
+      <span>Проверка</span>
+    </button>
+    <button class="nav-item" data-nav="screen-lb">
+      <span class="nav-ico"><svg viewBox="0 0 24 24"><path d="M4 20h3V11H4v9zm6 0h3V4h-3v16zm6 0h3v-7h-3v7z"/></svg></span>
+      <span>Лидеры</span>
+    </button>
+  </nav>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
