@@ -100,7 +100,7 @@
 
       <div id="submitError" class="err" role="alert"></div>
       <button id="btnSend" class="btn filled">Отправить на проверку</button>
-      <p class="hint">Безлимитно, без ожидания. ИИ разбирает пиксели кадра: цвета, контраст, границы и строки интерфейса. Повтор того же скриншота не пройдёт.</p>
+      <p class="hint">Настоящая проверка: OCR читает текст скриншота, находит счёт и слово результата, затем сверяет их с выбранным исходом. Повтор того же кадра не пройдёт.</p>
     </div>
   </section>
 
@@ -153,6 +153,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="vendor/tesseract/tesseract.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

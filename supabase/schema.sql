@@ -125,19 +125,20 @@ DROP FUNCTION IF EXISTS public.submit_result(text, text);
 
 -- ============================================================
 -- ПРОВЕРКА
--- 1. Лёгкий ИИ на устройстве разбирает пиксели: цвета, контраст,
---    границы объектов и строки интерфейса. Решение принимается по этим
---    признакам, а не по случаю.
--- 2. Сервер перепроверяет присланные признаки по порогам.
--- 3. Дедупликация по отпечатку (dHash) — тот же кадр не пройдёт дважды.
--- 4. Удаление старых версий функции — обход без ИИ невозможен.
+-- 1. OCR (Tesseract, rus+eng) читает текст кадра: счёт и слово результата.
+-- 2. Анализатор пикселей проверяет, что файл похож на игровой скриншот.
+-- 3. Сервер перепроверяет оба набора признаков по порогам.
+-- 4. Дедупликация по отпечатку (dHash) — тот же кадр не пройдёт дважды.
+-- 5. Старые версии функции удаляются — обход без OCR невозможен.
 -- ============================================================
 DROP FUNCTION IF EXISTS public.submit_result(text, text);
 DROP FUNCTION IF EXISTS public.submit_result(text, text, text, text);
+DROP FUNCTION IF EXISTS public.submit_result(text, text, text, text, boolean, jsonb);
 
 CREATE OR REPLACE FUNCTION public.submit_result(
   p_username text, p_outcome text, p_phash text, p_sha text,
-  p_ai_ok boolean, p_features jsonb
+  p_ai_ok boolean, p_features jsonb,
+  p_ocr_ok boolean, p_ocr jsonb
 )
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
@@ -149,6 +150,10 @@ DECLARE
   v_rows int := CASE WHEN (p_features->>'textRows') ~ '^\d+$' THEN (p_features->>'textRows')::int ELSE 0 END;
   v_contrast int := CASE WHEN (p_features->>'contrast') ~ '^\d+$' THEN (p_features->>'contrast')::int ELSE 0 END;
   v_score int := CASE WHEN (p_features->>'score') ~ '^\d+$' THEN (p_features->>'score')::int ELSE 0 END;
+  v_ocr_chars int := CASE WHEN (p_ocr->>'chars') ~ '^\d+$' THEN (p_ocr->>'chars')::int ELSE 0 END;
+  v_ocr_score boolean := coalesce((p_ocr->>'hasScore')::boolean, false);
+  v_ocr_result boolean := coalesce((p_ocr->>'hasResult')::boolean, false);
+  v_ocr_match boolean := coalesce((p_ocr->>'outcomeMatch')::boolean, false);
   v_ok boolean;
   v_delta int;
   v_row public.leaderboard%ROWTYPE;
@@ -174,7 +179,7 @@ BEGIN
     RETURN jsonb_build_object('error', 'duplicate', 'reason', 'Этот скриншот уже использован');
   END IF;
 
-  -- решение ИИ: сервер сам проверяет признаки, а не верит флагу клиента
+  -- сервер сам проверяет признаки кадра, а не верит флагу клиента
   v_ok := coalesce(p_ai_ok, false)
     AND v_w >= 400 AND v_h >= 400
     AND v_colors >= 30
@@ -190,7 +195,21 @@ BEGIN
     );
   END IF;
 
-  -- ИИ подтвердил кадр -> результат принимается. Удачи больше нет.
+  -- OCR: сервер требует, чтобы текст кадра содержал счёт, слово результата
+  -- и чтобы прочитанный исход совпадал с выбранным игроком.
+  IF NOT (coalesce(p_ocr_ok, false)
+      AND v_ocr_chars >= 8
+      AND v_ocr_score
+      AND v_ocr_result
+      AND v_ocr_match) THEN
+    RETURN jsonb_build_object(
+      'error', 'ocr_reject',
+      'reason', 'OCR не нашёл счёт или исход матча либо прочитанный результат не совпадает с выбранным',
+      'chars', v_ocr_chars
+    );
+  END IF;
+
+  -- кадр прочитан и подтверждён -> заявка принимается. Удачи больше нет.
   v_delta := CASE WHEN p_outcome = 'win' THEN 50 ELSE -10 END;
 
   IF v_row.day_reset IS NULL OR (v_row.day_reset AT TIME ZONE 'UTC')::date <> v_today THEN
@@ -233,6 +252,7 @@ REVOKE ALL ON FUNCTION public.get_profile(text) FROM anon, authenticated;
 REVOKE ALL ON FUNCTION public.submit_result(text, text) FROM anon, authenticated;
 REVOKE ALL ON FUNCTION public.submit_result(text, text, text, text) FROM anon, authenticated;
 REVOKE ALL ON FUNCTION public.submit_result(text, text, text, text, boolean, jsonb) FROM anon, authenticated;
+REVOKE ALL ON FUNCTION public.submit_result(text, text, text, text, boolean, jsonb, boolean, jsonb) FROM anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.get_or_create_user(text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.get_profile(text) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.submit_result(text, text, text, text, boolean, jsonb) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.submit_result(text, text, text, text, boolean, jsonb, boolean, jsonb) TO anon, authenticated;

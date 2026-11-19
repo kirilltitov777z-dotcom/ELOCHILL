@@ -36,6 +36,17 @@ jobs:
       - name: Generate launcher icon and splash (Material 3)
         run: npx @capacitor/assets generate --android --iconBackgroundColor '#0F172A' --iconBackgroundColorDark '#0F172A' --splashBackgroundColor '#0F172A' --splashBackgroundColorDark '#0F172A'
 
+      - name: Bundle OCR engine (Tesseract + eng model)
+        run: |
+          mkdir -p www/vendor/tesseract/lang www/vendor/tesseract/core
+          cp node_modules/tesseract.js/dist/tesseract.min.js www/vendor/tesseract/
+          cp node_modules/tesseract.js/dist/worker.min.js www/vendor/tesseract/
+          cp node_modules/tesseract.js-core/* www/vendor/tesseract/core/
+          curl -L --fail --retry 3 -o www/vendor/tesseract/lang/eng.traineddata.gz \
+            https://tessdata.projectnaptha.com/4.0.0/eng.traineddata.gz
+          curl -L --fail --retry 3 -o www/vendor/tesseract/lang/rus.traineddata.gz \
+            https://tessdata.projectnaptha.com/4.0.0/rus.traineddata.gz
+
       - name: Sync web assets
         run: npx cap sync android
 

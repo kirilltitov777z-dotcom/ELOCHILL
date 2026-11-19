@@ -233,11 +233,11 @@
   }
 
   var STEPS = [
-    '🤖 ИИ анализирует скриншот...',
-    '   Разбираю цвета и контраст кадра...',
-    '   Ищу границы элементов интерфейса...',
-    '   Ищу строки счёта и ника...',
-    '   Сверяю признаки с правилами...'
+    '🤖 Запускаю OCR-движок...',
+    '   Читаю текст с изображения...',
+    '   Ищу счёт матча в кадре...',
+    '   Ищу слово «победа/поражение»...',
+    '   Сверяю прочитанное с исходом...'
   ];
 
   // Лёгкий ИИ-анализатор кадра: отпечаток + признаки изображения.
@@ -360,6 +360,38 @@
     };
   }
 
+  // Настоящее чтение скриншота: Tesseract OCR ( rus + eng ), запущенный на устройстве.
+  var ocrWorker = null;
+  async function runOcr(file) {
+    if (!window.Tesseract || !window.Tesseract.createWorker) throw new Error('OCR-движок не загружен');
+    if (!ocrWorker) {
+      ocrWorker = await window.Tesseract.createWorker('eng+rus', 1, {
+        langPath: 'vendor/tesseract/lang',
+        corePath: 'vendor/tesseract/core',
+        workerPath: 'vendor/tesseract/worker.min.js',
+        workerBlobURL: false,
+        gzip: true,
+        logger: function () {}
+      });
+    }
+    var res = await ocrWorker.recognize(file);
+    var text = ((res && res.data && res.data.text) || '').trim();
+    var up = text.toUpperCase();
+    var hasWin = /ПОБЕД|VICTOR|\bWIN\b|\bWON\b|УСПЕШ/.test(up);
+    var hasLose = /ПОРАЖ|DEFEAT|\bLOSE\b|ПРОИГР|FAILED/.test(up);
+    var hasScore = /(\d{1,2})\s*[:\-–]\s*(\d{1,2})/.test(text);
+    var chars = text.replace(/\s+/g, '').length;
+    var outcomeMatch = outcome === 'win' ? (hasWin && !hasLose) : (hasLose && !hasWin);
+    return {
+      ok: chars >= 8 && hasScore && (hasWin || hasLose) && outcomeMatch,
+      chars: chars,
+      hasScore: hasScore,
+      hasResult: hasWin || hasLose,
+      outcomeMatch: outcomeMatch,
+      text: text.slice(0, 500)
+    };
+  }
+
   async function runCheck() {
     show('screen-check');
     var inspect;
@@ -368,6 +400,12 @@
     } catch (e) {
       showResult({ error: 'Не удалось прочитать скриншот' });
       return;
+    }
+    var ocr;
+    try {
+      ocr = await runOcr(fileObj);
+    } catch (e) {
+      ocr = { ok: false, chars: 0, hasScore: false, hasResult: false, outcomeMatch: false, text: '' };
     }
     var box = $('checkSteps');
     box.innerHTML = '';
@@ -396,7 +434,14 @@
         p_phash: inspect.phash,
         p_sha: inspect.sha,
         p_ai_ok: inspect.aiOk,
-        p_features: inspect.features
+        p_features: inspect.features,
+        p_ocr_ok: ocr.ok,
+        p_ocr: {
+          chars: ocr.chars,
+          hasScore: ocr.hasScore,
+          hasResult: ocr.hasResult,
+          outcomeMatch: ocr.outcomeMatch
+        }
       });
       setNet(true);
     } catch (e) {
@@ -428,6 +473,16 @@
         text: r.reason || 'Не удалось распознать элементы интерфейса матча',
         delta: 0,
         stats: 'Оценка ИИ: ' + (r.score || 0) + '/100<br>Эло без изменений: ' + user.elo
+      });
+      return;
+    }
+    if (r.error === 'ocr_reject') {
+      showResult({
+        title: 'OCR не подтвердил матч',
+        icon: '❌',
+        text: r.reason || 'Не удалось прочитать счёт и исход на скриншоте',
+        delta: 0,
+        stats: 'Распознано символов: ' + (r.chars || 0) + '<br>Эло без изменений: ' + user.elo
       });
       return;
     }
