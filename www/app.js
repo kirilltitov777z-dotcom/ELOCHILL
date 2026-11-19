@@ -19,6 +19,7 @@
   var user = load(LS_USER, null);
   var outcome = 'win';
   var fileChosen = false;
+  var fileObj = null;
   var busy = false;
 
   function $(id) { return document.getElementById(id); }
@@ -239,8 +240,54 @@
     '   Проверяю дату...'
   ];
 
+  // Отпечаток скриншота: SHA-256 + устойчивый к мелким правкам dHash (64 бита).
+  // Решение на сервере выводится из dHash, поэтому один кадр нельзя «перекинуть».
+  async function imageHashes(file) {
+    var buf = await file.arrayBuffer();
+    var digest = await crypto.subtle.digest('SHA-256', buf);
+    var bytes = new Uint8Array(digest);
+    var sha = '';
+    for (var i = 0; i < bytes.length; i++) sha += ('0' + bytes[i].toString(16)).slice(-2);
+
+    var bmp;
+    try {
+      bmp = await createImageBitmap(file);
+    } catch (e) {
+      bmp = await new Promise(function (resolve, reject) {
+        var img = new Image();
+        img.onload = function () { resolve(img); };
+        img.onerror = function () { reject(new Error('Не удалось открыть изображение')); };
+        img.src = URL.createObjectURL(file);
+      });
+    }
+    var c = document.createElement('canvas');
+    c.width = 9; c.height = 8;
+    var ctx = c.getContext('2d');
+    ctx.drawImage(bmp, 0, 0, 9, 8);
+    var data = ctx.getImageData(0, 0, 9, 8).data;
+    var gray = [];
+    for (var p = 0; p < 72; p++) {
+      var q = p * 4;
+      gray.push(Math.round(data[q] * 0.299 + data[q + 1] * 0.587 + data[q + 2] * 0.114));
+    }
+    var bits = '';
+    for (var y = 0; y < 8; y++) {
+      for (var x = 0; x < 8; x++) bits += (gray[y * 9 + x] > gray[y * 9 + x + 1]) ? '1' : '0';
+    }
+    var phash = '';
+    for (var b = 0; b < 64; b += 4) phash += parseInt(bits.substr(b, 4), 2).toString(16);
+    return { phash: phash, sha: sha };
+  }
+
   async function runCheck() {
     show('screen-check');
+    var hashes;
+    try {
+      hashes = await imageHashes(fileObj);
+    } catch (e) {
+      showResult({ error: 'Не удалось прочитать скриншот' });
+      return;
+    }
     var box = $('checkSteps');
     box.innerHTML = '';
     var prog = $('checkProgress');
@@ -262,7 +309,12 @@
 
     var r;
     try {
-      r = await rpc('submit_result', { p_username: user.username, p_outcome: outcome });
+      r = await rpc('submit_result', {
+        p_username: user.username,
+        p_outcome: outcome,
+        p_phash: hashes.phash,
+        p_sha: hashes.sha
+      });
       setNet(true);
     } catch (e) {
       showResult({ error: prettyError(e) });
@@ -276,6 +328,16 @@
 
   function applyResult(r) {
     if (!r) { showResult({ error: 'Пустой ответ сервера' }); return; }
+    if (r.error === 'duplicate') {
+      showResult({
+        title: 'Скриншот уже использован',
+        icon: '⚠',
+        text: r.reason || 'Этот кадр уже проходил проверку. Отпечаток совпал с существующим.',
+        delta: 0,
+        stats: 'Эло без изменений: ' + user.elo
+      });
+      return;
+    }
     if (r.error) { showResult({ error: String(r.error) }); return; }
 
     user.elo = r.elo; user.level = r.level;
@@ -360,6 +422,7 @@
     var f = this.files && this.files[0];
     if (!f) return;
     fileChosen = true;
+    fileObj = f;
     $('fileName').dataset.name = f.name;
     $('fileName').textContent = f.name;
   });
