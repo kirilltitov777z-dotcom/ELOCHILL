@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>ELOCHILL</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">ELO<span>CHILL</span></div>
+    <div id="net" class="net online"><i></i><span>Онлайн</span></div>
+  </header>
+
+  <!-- ВХОД -->
+  <section id="screen-login" class="screen active">
+    <div class="hero">
+      <div class="hero-mark">E</div>
+      <h1>ELOCHILL</h1>
+      <p class="sub">Подтверждение результатов StandChillow</p>
+    </div>
+    <div class="card">
+      <label class="label" for="nickInput">Ник игрока</label>
+      <input id="nickInput" class="input" type="text" maxlength="24" autocomplete="off" spellcheck="false" placeholder="Введите ник">
+      <div id="loginError" class="err"></div>
+      <button id="btnLogin" class="btn primary">Войти</button>
+      <p class="hint">Ник используется для поиска вашего профиля. Повторный вход с тем же ником вернёт ваш Эло.</p>
+    </div>
+  </section>
+
+  <!-- ГЛАВНОЕ МЕНЮ -->
+  <section id="screen-main" class="screen">
+    <div class="profile card">
+      <div class="avatar" id="mAva">E</div>
+      <div class="profile-main">
+        <div class="nick" id="mNick">—</div>
+        <div class="badges">
+          <span class="badge">Уровень <b id="mLevel">1</b></span>
+          <span class="badge elo">Эло <b id="mElo">0</b></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card next-card">
+      <div class="row"><span>Следующий уровень</span><span id="mNext">200 Эло</span></div>
+      <div class="progress"><div id="mProgress" class="progress-fill"></div></div>
+    </div>
+
+    <div class="grid2">
+      <div class="card mini">
+        <div class="mini-label">Проверок сегодня</div>
+        <div class="mini-value" id="mSubs">0 / 10</div>
+      </div>
+      <div class="card mini">
+        <div class="mini-label">Следующая проверка</div>
+        <div class="mini-value" id="mCooldown">доступно</div>
+      </div>
+    </div>
+
+    <button id="btnSubmit" class="btn primary big">📸 Отправить результат</button>
+    <button id="btnLeaderboard" class="btn ghost">🏆 Таблица лидеров</button>
+    <button id="btnLogout" class="btn ghost small">Выйти</button>
+
+    <div id="offlineNote" class="notice">Нет соединения — доступен только просмотр сохранённых данных.</div>
+  </section>
+
+  <!-- ОТПРАВКА -->
+  <section id="screen-submit" class="screen">
+    <button class="back" data-back="screen-main">‹ Назад</button>
+    <h2 class="title">Отправить результат</h2>
+    <div class="card">
+      <label class="label">Скриншот матча</label>
+      <label class="filepick" for="fileInput">
+        <span class="filepick-ico">＋</span>
+        <span id="fileName">Выбрать скриншот</span>
+      </label>
+      <input id="fileInput" class="hidden-input" type="file" accept="image/*">
+      <p class="hint">Файл нужен для симуляции проверки. Изображение никуда не загружается.</p>
+
+      <label class="label">Исход матча</label>
+      <div class="outcomes">
+        <label class="outcome">
+          <input type="radio" name="outcome" value="win" checked>
+          <span class="outcome-box"><b>Победа</b><small>+50 Эло</small></span>
+        </label>
+        <label class="outcome">
+          <input type="radio" name="outcome" value="lose">
+          <span class="outcome-box"><b>Поражение</b><small>−10 Эло</small></span>
+        </label>
+      </div>
+
+      <div id="submitError" class="err"></div>
+      <button id="btnSend" class="btn primary">Отправить на проверку</button>
+      <p class="hint">Лимит: не чаще 1 раза в 3 минуты, максимум 10 проверок в день. Проверка одобряется с вероятностью 80%.</p>
+    </div>
+  </section>
+
+  <!-- ПРОВЕРКА -->
+  <section id="screen-check" class="screen">
+    <div class="checking">
+      <div class="spinner"></div>
+      <h2 class="title center">Проверка результата</h2>
+      <div id="checkSteps" class="steps"></div>
+      <div class="progress"><div id="checkProgress" class="progress-fill" style="width:0%"></div></div>
+    </div>
+  </section>
+
+  <!-- РЕЗУЛЬТАТ -->
+  <section id="screen-result" class="screen">
+    <div class="card result-card">
+      <div id="resultIcon" class="result-icon">✅</div>
+      <h2 id="resultTitle" class="title center">Подтверждено</h2>
+      <p id="resultText" class="result-text"></p>
+      <div id="resultDelta" class="delta"></div>
+      <div id="resultStats" class="result-stats"></div>
+      <button id="btnResultMenu" class="btn primary">В главное меню</button>
+    </div>
+  </section>
+
+  <!-- ТАБЛИЦА ЛИДЕРОВ -->
+  <section id="screen-lb" class="screen">
+    <button class="back" data-back="screen-main">‹ Назад</button>
+    <div class="lb-head">
+      <h2 class="title">Таблица лидеров</h2>
+      <span id="lbBadge" class="cached">сохранённые данные</span>
+    </div>
+    <div id="lbList" class="lb-list"></div>
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

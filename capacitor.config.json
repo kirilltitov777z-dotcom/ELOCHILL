@@ -1,0 +1,9 @@
+{
+  "appId": "com.elochill.app",
+  "appName": "ELOCHILL",
+  "webDir": "www",
+  "loggingBehavior": "none",
+  "android": {
+    "allowMixedContent": false
+  }
+}
