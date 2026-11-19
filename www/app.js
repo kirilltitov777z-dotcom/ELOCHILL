@@ -370,7 +370,7 @@
         corePath: 'vendor/tesseract/core',
         workerPath: 'vendor/tesseract/worker.min.js',
         workerBlobURL: false,
-        gzip: true,
+        gzip: false,
         logger: function () {}
       });
     }
