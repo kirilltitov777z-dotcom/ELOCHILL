@@ -233,57 +233,138 @@
   }
 
   var STEPS = [
-    '🤖 Проверяю скриншот...',
-    '   Ищу счёт матча...',
-    '   Ищу ник игрока...',
-    '   Проверяю интерфейс...',
-    '   Проверяю дату...'
+    '🤖 ИИ анализирует скриншот...',
+    '   Разбираю цвета и контраст кадра...',
+    '   Ищу границы элементов интерфейса...',
+    '   Ищу строки счёта и ника...',
+    '   Сверяю признаки с правилами...'
   ];
 
-  // Отпечаток скриншота: SHA-256 + устойчивый к мелким правкам dHash (64 бита).
-  // Решение на сервере выводится из dHash, поэтому один кадр нельзя «перекинуть».
-  async function imageHashes(file) {
-    var buf = await file.arrayBuffer();
-    var digest = await crypto.subtle.digest('SHA-256', buf);
-    var bytes = new Uint8Array(digest);
-    var sha = '';
-    for (var i = 0; i < bytes.length; i++) sha += ('0' + bytes[i].toString(16)).slice(-2);
-
-    var bmp;
-    try {
-      bmp = await createImageBitmap(file);
-    } catch (e) {
-      bmp = await new Promise(function (resolve, reject) {
+  // Лёгкий ИИ-анализатор кадра: отпечаток + признаки изображения.
+  // Решение принимается по признакам, а не по случайности.
+  async function loadBitmap(file) {
+    try { return await createImageBitmap(file); }
+    catch (e) {
+      return await new Promise(function (resolve, reject) {
         var img = new Image();
         img.onload = function () { resolve(img); };
         img.onerror = function () { reject(new Error('Не удалось открыть изображение')); };
         img.src = URL.createObjectURL(file);
       });
     }
-    var c = document.createElement('canvas');
-    c.width = 9; c.height = 8;
-    var ctx = c.getContext('2d');
-    ctx.drawImage(bmp, 0, 0, 9, 8);
-    var data = ctx.getImageData(0, 0, 9, 8).data;
-    var gray = [];
+  }
+
+  async function inspectFile(file) {
+    var buf = await file.arrayBuffer();
+    var digest = await crypto.subtle.digest('SHA-256', buf);
+    var bytes = new Uint8Array(digest);
+    var sha = '';
+    for (var i = 0; i < bytes.length; i++) sha += ('0' + bytes[i].toString(16)).slice(-2);
+
+    var bmp = await loadBitmap(file);
+    var w = bmp.width || bmp.naturalWidth;
+    var h = bmp.height || bmp.naturalHeight;
+
+    // --- dHash: 9x8 grayscale, 64 бита ---
+    var c1 = document.createElement('canvas');
+    c1.width = 9; c1.height = 8;
+    var x1 = c1.getContext('2d');
+    x1.drawImage(bmp, 0, 0, 9, 8);
+    var small = x1.getImageData(0, 0, 9, 8).data;
+    var sg = [];
     for (var p = 0; p < 72; p++) {
       var q = p * 4;
-      gray.push(Math.round(data[q] * 0.299 + data[q + 1] * 0.587 + data[q + 2] * 0.114));
+      sg.push(Math.round(small[q] * 0.299 + small[q + 1] * 0.587 + small[q + 2] * 0.114));
     }
     var bits = '';
     for (var y = 0; y < 8; y++) {
-      for (var x = 0; x < 8; x++) bits += (gray[y * 9 + x] > gray[y * 9 + x + 1]) ? '1' : '0';
+      for (var x = 0; x < 8; x++) bits += (sg[y * 9 + x] > sg[y * 9 + x + 1]) ? '1' : '0';
     }
     var phash = '';
     for (var b = 0; b < 64; b += 4) phash += parseInt(bits.substr(b, 4), 2).toString(16);
-    return { phash: phash, sha: sha };
+
+    // --- признаки кадра: 96x96 ---
+    var N = 96;
+    var c2 = document.createElement('canvas');
+    c2.width = N; c2.height = N;
+    var x2 = c2.getContext('2d', { willReadFrequently: true });
+    x2.drawImage(bmp, 0, 0, N, N);
+    var d = x2.getImageData(0, 0, N, N).data;
+    var g = new Float32Array(N * N);
+    var palette = {};
+    var sum = 0;
+    for (var k = 0; k < N * N; k++) {
+      var o = k * 4, r = d[o], gg = d[o + 1], bb = d[o + 2];
+      g[k] = 0.299 * r + 0.587 * gg + 0.114 * bb;
+      sum += g[k];
+      palette[((r >> 3) << 10) | ((gg >> 3) << 5) | (bb >> 3)] = 1;
+    }
+    var colorCount = Object.keys(palette).length;
+    var mean = sum / (N * N);
+    var varSum = 0;
+    for (var m = 0; m < g.length; m++) varSum += (g[m] - mean) * (g[m] - mean);
+    var contrast = Math.sqrt(varSum / g.length);
+
+    var edgeCount = 0, edgeTotal = 0;
+    for (var yy = 1; yy < N - 1; yy++) {
+      for (var xx = 1; xx < N - 1; xx++) {
+        var idx = yy * N + xx;
+        var mag = Math.abs(g[idx + 1] - g[idx - 1]) + Math.abs(g[idx + N] - g[idx - N]);
+        edgeTotal++;
+        if (mag > 60) edgeCount++;
+      }
+    }
+    var edgeFrac = edgeCount / edgeTotal;
+
+    // строки с текстом/интерфейсом в верхней части кадра
+    var rowEnergy = [];
+    for (var ry = 2; ry < 58; ry++) {
+      var e = 0;
+      for (var rx = 1; rx < N - 1; rx++) {
+        var j = ry * N + rx;
+        e += Math.abs(g[j + 1] - g[j - 1]) + Math.abs(g[j + N] - g[j - N]);
+      }
+      rowEnergy.push(e / (N - 2));
+    }
+    var avgE = 0;
+    for (var a = 0; a < rowEnergy.length; a++) avgE += rowEnergy[a];
+    avgE /= rowEnergy.length;
+    var textRows = 0;
+    for (var t = 0; t < rowEnergy.length; t++) {
+      if (rowEnergy[t] > avgE * 1.8 && rowEnergy[t] > 18) textRows++;
+    }
+
+    var minSide = Math.min(w, h), maxSide = Math.max(w, h);
+    var aiOk = minSide >= 400 && maxSide / minSide <= 2.3 &&
+      colorCount >= 30 && edgeFrac >= 0.015 && textRows >= 2 && contrast >= 18;
+
+    var score = Math.round(Math.min(100,
+      (Math.min(colorCount, 140) / 140) * 18 +
+      (Math.min(edgeFrac, 0.12) / 0.12) * 22 +
+      (Math.min(textRows, 14) / 14) * 24 +
+      (Math.min(contrast, 75) / 75) * 22 +
+      (Math.min(minSide, 1080) / 1080) * 14));
+
+    return {
+      phash: phash,
+      sha: sha,
+      aiOk: aiOk,
+      features: {
+        w: w, h: h,
+        colors: colorCount,
+        edges: Number(edgeFrac.toFixed(4)),
+        textRows: textRows,
+        contrast: Math.round(contrast),
+        score: score
+      }
+    };
   }
 
   async function runCheck() {
     show('screen-check');
-    var hashes;
+    var inspect;
     try {
-      hashes = await imageHashes(fileObj);
+      inspect = await inspectFile(fileObj);
     } catch (e) {
       showResult({ error: 'Не удалось прочитать скриншот' });
       return;
@@ -312,8 +393,10 @@
       r = await rpc('submit_result', {
         p_username: user.username,
         p_outcome: outcome,
-        p_phash: hashes.phash,
-        p_sha: hashes.sha
+        p_phash: inspect.phash,
+        p_sha: inspect.sha,
+        p_ai_ok: inspect.aiOk,
+        p_features: inspect.features
       });
       setNet(true);
     } catch (e) {
@@ -338,6 +421,16 @@
       });
       return;
     }
+    if (r.error === 'ai_reject') {
+      showResult({
+        title: 'ИИ не принял кадр',
+        icon: '❌',
+        text: r.reason || 'Не удалось распознать элементы интерфейса матча',
+        delta: 0,
+        stats: 'Оценка ИИ: ' + (r.score || 0) + '/100<br>Эло без изменений: ' + user.elo
+      });
+      return;
+    }
     if (r.error) { showResult({ error: String(r.error) }); return; }
 
     user.elo = r.elo; user.level = r.level;
@@ -349,9 +442,9 @@
       showResult({
         title: 'Подтверждено!',
         icon: '✅',
-        text: 'Результат прошёл автоматическую проверку',
+        text: 'ИИ распознал элементы матча и подтвердил результат',
         delta: r.delta || 0,
-        stats: 'Эло: ' + r.elo + ' · Уровень: ' + r.level + '<br>Проверок сегодня: ' + user.submissions_today + ' · Всего: ' + user.total_submissions
+        stats: 'Оценка ИИ: ' + (r.score || 0) + '/100<br>Эло: ' + r.elo + ' · Уровень: ' + r.level + '<br>Проверок сегодня: ' + user.submissions_today + ' · Всего: ' + user.total_submissions
       });
     } else {
       showResult({

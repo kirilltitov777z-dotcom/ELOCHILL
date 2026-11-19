@@ -125,21 +125,31 @@ DROP FUNCTION IF EXISTS public.submit_result(text, text);
 
 -- ============================================================
 -- ПРОВЕРКА
--- 1. Отпечаток скриншота считается на устройстве и передаётся с ним.
--- 2. Повтор: тот же отпечаток (или отличающийся <=5 бит) уже в базе -> отказ.
--- 3. Решение НЕ случайное: оно жёстко выводится из md5(серверный секрет || отпечаток).
---    Один и тот же скриншот всегда даёт один и тот же результат — перекидывать бесполезно.
--- 4. Секрет хранится только в теле функции, клиенту недоступен.
+-- 1. Лёгкий ИИ на устройстве разбирает пиксели: цвета, контраст,
+--    границы объектов и строки интерфейса. Решение принимается по этим
+--    признакам, а не по случаю.
+-- 2. Сервер перепроверяет присланные признаки по порогам.
+-- 3. Дедупликация по отпечатку (dHash) — тот же кадр не пройдёт дважды.
+-- 4. Удаление старых версий функции — обход без ИИ невозможен.
 -- ============================================================
+DROP FUNCTION IF EXISTS public.submit_result(text, text);
+DROP FUNCTION IF EXISTS public.submit_result(text, text, text, text);
+
 CREATE OR REPLACE FUNCTION public.submit_result(
-  p_username text, p_outcome text, p_phash text, p_sha text
+  p_username text, p_outcome text, p_phash text, p_sha text,
+  p_ai_ok boolean, p_features jsonb
 )
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
-  c_secret constant text := 'elochill-verify-k3y-9f2a7c41-d8b6';
   v_phash text := lower(coalesce(p_phash, ''));
-  v_roll int;
-  v_accepted boolean;
+  v_w int := CASE WHEN (p_features->>'w') ~ '^\d+$' THEN (p_features->>'w')::int ELSE 0 END;
+  v_h int := CASE WHEN (p_features->>'h') ~ '^\d+$' THEN (p_features->>'h')::int ELSE 0 END;
+  v_colors int := CASE WHEN (p_features->>'colors') ~ '^\d+$' THEN (p_features->>'colors')::int ELSE 0 END;
+  v_edges numeric := CASE WHEN (p_features->>'edges') ~ '^\d*\.?\d+$' THEN (p_features->>'edges')::numeric ELSE 0 END;
+  v_rows int := CASE WHEN (p_features->>'textRows') ~ '^\d+$' THEN (p_features->>'textRows')::int ELSE 0 END;
+  v_contrast int := CASE WHEN (p_features->>'contrast') ~ '^\d+$' THEN (p_features->>'contrast')::int ELSE 0 END;
+  v_score int := CASE WHEN (p_features->>'score') ~ '^\d+$' THEN (p_features->>'score')::int ELSE 0 END;
+  v_ok boolean;
   v_delta int;
   v_row public.leaderboard%ROWTYPE;
   v_today date := (now() AT TIME ZONE 'UTC')::date;
@@ -155,24 +165,32 @@ BEGIN
   WHERE username = btrim(p_username) FOR UPDATE;
   IF NOT FOUND THEN RETURN jsonb_build_object('error', 'Игрок не найден'); END IF;
 
-  -- дедупликация: точный отпечаток
-  IF EXISTS (SELECT 1 FROM public.screenshots WHERE p_hash = v_phash) THEN
-    RETURN jsonb_build_object('error', 'duplicate',
-      'reason', 'Этот скриншот уже использован');
+  -- повтор кадра
+  IF EXISTS (SELECT 1 FROM public.screenshots WHERE p_hash = v_phash)
+     OR EXISTS (
+       SELECT 1 FROM public.screenshots s
+       WHERE bit_count(('x' || s.p_hash)::bit(64) # ('x' || v_phash)::bit(64)) <= 5
+     ) THEN
+    RETURN jsonb_build_object('error', 'duplicate', 'reason', 'Этот скриншот уже использован');
   END IF;
 
-  -- дедупликация: почти тот же кадр (до 5 бит difference hash)
-  IF EXISTS (
-    SELECT 1 FROM public.screenshots s
-    WHERE bit_count(('x' || s.p_hash)::bit(64) # ('x' || v_phash)::bit(64)) <= 5
-  ) THEN
-    RETURN jsonb_build_object('error', 'duplicate',
-      'reason', 'Этот скриншот уже использован');
+  -- решение ИИ: сервер сам проверяет признаки, а не верит флагу клиента
+  v_ok := coalesce(p_ai_ok, false)
+    AND v_w >= 400 AND v_h >= 400
+    AND v_colors >= 30
+    AND v_edges >= 0.015
+    AND v_rows >= 2
+    AND v_contrast >= 18;
+
+  IF NOT v_ok THEN
+    RETURN jsonb_build_object(
+      'error', 'ai_reject',
+      'reason', 'ИИ не смог распознать элементы интерфейса матча на скриншоте',
+      'score', v_score
+    );
   END IF;
 
-  -- детерминированный результат: 80% порог, но отпечаток решает заранее
-  v_roll := (('x' || substring(md5(c_secret || v_phash) from 1 for 2))::bit(8))::int;
-  v_accepted := v_roll < 205;
+  -- ИИ подтвердил кадр -> результат принимается. Удачи больше нет.
   v_delta := CASE WHEN p_outcome = 'win' THEN 50 ELSE -10 END;
 
   IF v_row.day_reset IS NULL OR (v_row.day_reset AT TIME ZONE 'UTC')::date <> v_today THEN
@@ -181,7 +199,7 @@ BEGIN
   END IF;
 
   UPDATE public.leaderboard
-    SET elo = CASE WHEN v_accepted THEN elo + v_delta ELSE elo END,
+    SET elo = elo + v_delta,
         last_submit = now(),
         submissions_today = submissions_today + 1,
         total_submissions = COALESCE(total_submissions, 0) + 1,
@@ -191,18 +209,19 @@ BEGIN
       INTO v_row.elo, v_row.level, v_row.submissions_today, v_row.total_submissions;
 
   INSERT INTO public.screenshots (p_hash, sha256, username, accepted)
-    VALUES (v_phash, left(coalesce(p_sha, ''), 64), v_row.username, v_accepted);
+    VALUES (v_phash, left(coalesce(p_sha, ''), 64), true);
 
   INSERT INTO public.submissions (username, outcome, accepted)
-    VALUES (v_row.username, p_outcome, v_accepted);
+    VALUES (v_row.username, p_outcome, true);
 
   RETURN jsonb_build_object(
-    'accepted', v_accepted,
+    'accepted', true,
     'outcome', p_outcome,
-    'delta', CASE WHEN v_accepted THEN v_delta ELSE 0 END,
+    'delta', v_delta,
     'elo', v_row.elo,
     'level', v_row.level,
-    'reason', CASE WHEN v_accepted THEN '' ELSE 'Не удалось распознать данные на скриншоте' END,
+    'reason', '',
+    'score', v_score,
     'submissions_today', v_row.submissions_today,
     'total_submissions', v_row.total_submissions
   );
@@ -213,6 +232,7 @@ REVOKE ALL ON FUNCTION public.get_or_create_user(text) FROM anon, authenticated;
 REVOKE ALL ON FUNCTION public.get_profile(text) FROM anon, authenticated;
 REVOKE ALL ON FUNCTION public.submit_result(text, text) FROM anon, authenticated;
 REVOKE ALL ON FUNCTION public.submit_result(text, text, text, text) FROM anon, authenticated;
+REVOKE ALL ON FUNCTION public.submit_result(text, text, text, text, boolean, jsonb) FROM anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.get_or_create_user(text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.get_profile(text) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.submit_result(text, text, text, text) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.submit_result(text, text, text, text, boolean, jsonb) TO anon, authenticated;
